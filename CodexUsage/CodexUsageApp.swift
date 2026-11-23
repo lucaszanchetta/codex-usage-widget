@@ -1,0 +1,139 @@
+import SwiftUI
+import WidgetKit
+import AppKit
+
+@main
+struct CodexUsageApp: App {
+    @NSApplicationDelegateAdaptor(CompanionDelegate.self) private var companion
+    @AppStorage("showMenuBarIcon") private var showMenuBarIcon = true
+
+    var body: some Scene {
+        MenuBarExtra(isInserted: $showMenuBarIcon) {
+            MenuBarContent(model: companion.model, openDetails: companion.openDetails)
+        } label: {
+            Label("Codex Usage", systemImage: "gauge.with.dots.needle.67percent")
+        }
+    }
+}
+
+@MainActor
+final class CompanionDelegate: NSObject, NSApplicationDelegate {
+    let model = AppModel()
+    private var detailsWindow: NSWindow?
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        openDetails()
+        return false
+    }
+
+    func openDetails() {
+        if detailsWindow == nil {
+            let content = ContentView(model: model)
+                .frame(minWidth: 360, minHeight: 300)
+            let window = NSWindow(contentViewController: NSHostingController(rootView: content))
+            window.title = "Codex Usage"
+            window.isReleasedWhenClosed = false
+            window.center()
+            detailsWindow = window
+        }
+        detailsWindow?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+}
+
+@MainActor
+final class AppModel: ObservableObject {
+    @Published private(set) var snapshot: UsageSnapshot?
+    @Published private(set) var isRefreshing = false
+    @Published private(set) var errorMessage: String?
+    private let client = CodexRateLimitsClient()
+    private var refreshLoopTask: Task<Void, Never>?
+    init() {
+        snapshot = UsageStore.load()
+        refreshLoopTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 15 * 60 * 1_000_000_000)
+                guard !Task.isCancelled else { return }
+                self?.refresh()
+            }
+        }
+        refresh()
+    }
+    deinit { refreshLoopTask?.cancel() }
+    func refresh() {
+        guard !isRefreshing else { return }; isRefreshing = true; errorMessage = nil
+        Task {
+            do {
+                let value = try await client.fetch()
+                snapshot = value
+                do {
+                    try UsageStore.save(value)
+                    WidgetCenter.shared.reloadTimelines(ofKind: "CodexUsageWidget")
+                } catch {
+                    errorMessage = "Usage refreshed, but the widget snapshot could not be saved. Storage: \(UsageStore.storageLocation). \(error.localizedDescription)"
+                }
+            }
+            catch { errorMessage = error.localizedDescription }
+            isRefreshing = false
+        }
+    }
+}
+
+struct MenuBarContent: View {
+    @ObservedObject var model: AppModel
+    let openDetails: () -> Void
+
+    var body: some View {
+        if let limit = model.snapshot?.weeklyLimits.first {
+            Text("Codex · \(limit.remainingPercent, specifier: "%.1f")% remaining").font(.headline)
+            if let gap = limit.paceGap(at: Date()) { Text(UsageCalculator.formatPaceGap(gap)).foregroundStyle(gap < 0 ? .green : .red) }
+            Text(UsageCalculator.formatDuration(limit.secondsUntilReset(at: Date()))).foregroundStyle(.secondary)
+            Divider()
+        } else {
+            Text("No usage snapshot yet").foregroundStyle(.secondary)
+            Divider()
+        }
+        Button(model.isRefreshing ? "Refreshing…" : "Refresh") { model.refresh() }.disabled(model.isRefreshing)
+        Button("Open Details…", action: openDetails)
+        if let error = model.errorMessage { Text(error).font(.caption).foregroundStyle(.red).lineLimit(3) }
+        Divider()
+        Button("Quit") { NSApplication.shared.terminate(nil) }
+    }
+}
+
+struct ContentView: View {
+    @ObservedObject var model: AppModel
+    @AppStorage("showMenuBarIcon") private var showMenuBarIcon = true
+    var body: some View {
+        let now = Date()
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                Label("Codex Usage", systemImage: "gauge.with.dots.needle.67percent").font(.title2.weight(.semibold)); Spacer()
+                Button { model.refresh() } label: { Image(systemName: model.isRefreshing ? "arrow.triangle.2.circlepath" : "arrow.clockwise") }.disabled(model.isRefreshing).help("Refresh from Codex")
+            }
+            Toggle("Show menu bar icon", isOn: $showMenuBarIcon)
+            if let limits = model.snapshot?.weeklyLimits, !limits.isEmpty {
+                ForEach(limits) { limit in LimitCard(limit: limit, now: now) }
+                if let snapshot = model.snapshot {
+                    HStack(spacing: 5) {
+                        if UsageCalculator.isStale(snapshot, at: now) { Image(systemName: "exclamationmark.triangle.fill"); Text("Stale snapshot") }
+                        Text("Updated \(snapshot.fetchedAt.formatted(date: .omitted, time: .shortened))")
+                    }.font(.caption).foregroundStyle(UsageCalculator.isStale(snapshot, at: now) ? .orange : .secondary)
+                }
+            } else { ContentUnavailableView("No usage yet", systemImage: "chart.bar.xaxis", description: Text("Refresh after signing in with the Codex CLI.")) }
+            if let error = model.errorMessage { Text(error).font(.caption).foregroundStyle(.red) }
+        }.padding(20).task { model.refresh() }
+    }
+}
+
+struct LimitCard: View {
+    let limit: WeeklyLimit
+    let now: Date
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(limit.limitName).font(.headline); ProgressView(value: limit.usedPercent, total: 100).tint(limit.paceDelta(at: now) ?? 0 > 10 ? .orange : .accentColor)
+            HStack { Text("\(limit.remainingPercent, specifier: "%.1f")% remaining"); Spacer(); Text(UsageCalculator.formatDuration(limit.secondsUntilReset(at: now))) }.font(.subheadline)
+            if let gap = limit.paceGap(at: now) { Text("Pace gap: \(UsageCalculator.formatPaceGap(gap))").font(.caption).foregroundStyle(gap < 0 ? .green : .red) }
+        }.padding(14).background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 12))
+    }
+}
