@@ -1,6 +1,8 @@
 import SwiftUI
 import WidgetKit
 import AppKit
+import CoreServices
+import ServiceManagement
 
 @main
 struct CodexUsageApp: App {
@@ -8,7 +10,7 @@ struct CodexUsageApp: App {
     @AppStorage("showMenuBarIcon") private var showMenuBarIcon = true
 
     var body: some Scene {
-        MenuBarExtra(isInserted: $showMenuBarIcon) {
+        MenuBarExtra(isInserted: Binding(get: { showMenuBarIcon }, set: { _ in })) {
             MenuBarContent(model: companion.model, openDetails: companion.openDetails)
         } label: {
             Label("Codex Usage", systemImage: "gauge.with.dots.needle.67percent")
@@ -22,6 +24,12 @@ final class CompanionDelegate: NSObject, NSApplicationDelegate {
     private var detailsWindow: NSWindow?
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if let event = NSAppleEventManager.shared().currentAppleEvent {
+            if event.paramDescriptor(forKeyword: AEKeyword(keyAELaunchedAsLogInItem)) != nil
+                || event.paramDescriptor(forKeyword: AEKeyword(kAEApplicationActivationExpected))?.booleanValue == false {
+                return false
+            }
+        }
         openDetails()
         return false
     }
@@ -104,6 +112,29 @@ struct MenuBarContent: View {
 struct ContentView: View {
     @ObservedObject var model: AppModel
     @AppStorage("showMenuBarIcon") private var showMenuBarIcon = true
+    @State private var loginStatus = SMAppService.mainApp.status
+    @State private var loginError: String?
+
+    private var launchAtLogin: Binding<Bool> {
+        Binding(
+            get: { loginStatus == .enabled },
+            set: { enabled in
+                let service = SMAppService.mainApp
+                loginError = nil
+                defer { loginStatus = service.status }
+                do {
+                    if enabled, service.status != .enabled {
+                        try service.register()
+                    } else if !enabled, service.status == .enabled {
+                        try service.unregister()
+                    }
+                } catch {
+                    loginError = error.localizedDescription
+                }
+            }
+        )
+    }
+
     var body: some View {
         let now = Date()
         VStack(alignment: .leading, spacing: 16) {
@@ -112,6 +143,14 @@ struct ContentView: View {
                 Button { model.refresh() } label: { Image(systemName: model.isRefreshing ? "arrow.triangle.2.circlepath" : "arrow.clockwise") }.disabled(model.isRefreshing).help("Refresh from Codex")
             }
             Toggle("Show menu bar icon", isOn: $showMenuBarIcon)
+            Toggle("Launch at login", isOn: launchAtLogin)
+            if loginStatus == .requiresApproval {
+                Button("Manage Login Items in System Settings") {
+                    SMAppService.openSystemSettingsLoginItems()
+                }
+            } else if let loginError {
+                Text(loginError).font(.caption).foregroundStyle(.red)
+            }
             if let limits = model.snapshot?.weeklyLimits, !limits.isEmpty {
                 ForEach(limits) { limit in LimitCard(limit: limit, now: now) }
                 if let snapshot = model.snapshot {
@@ -122,7 +161,15 @@ struct ContentView: View {
                 }
             } else { ContentUnavailableView("No usage yet", systemImage: "chart.bar.xaxis", description: Text("Refresh after signing in with the Codex CLI.")) }
             if let error = model.errorMessage { Text(error).font(.caption).foregroundStyle(.red) }
-        }.padding(20).task { model.refresh() }
+        }
+        .padding(20)
+        .task {
+            loginStatus = SMAppService.mainApp.status
+            model.refresh()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            loginStatus = SMAppService.mainApp.status
+        }
     }
 }
 
