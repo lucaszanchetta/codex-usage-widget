@@ -59,8 +59,8 @@ private final class JSONLineReader {
     init(pipe: Pipe) { self.pipe = pipe }
 
     func response(id: Int) throws -> [String: Any] {
-        let deadline = Date().addingTimeInterval(30)
-        while Date() < deadline {
+        let deadline = DispatchTime.now() + .seconds(30)
+        while true {
             while let newline = buffer.firstIndex(of: 10) {
                 let line = buffer.prefix(upTo: newline)
                 buffer.removeSubrange(...newline)
@@ -70,8 +70,11 @@ private final class JSONLineReader {
                 return result
             }
 
+            let now = DispatchTime.now()
+            guard now < deadline else { break }
+            let remainingNanos = deadline.uptimeNanoseconds - now.uptimeNanoseconds
+            let milliseconds = Int32((remainingNanos + 999_999) / 1_000_000)
             var descriptor = pollfd(fd: pipe.fileHandleForReading.fileDescriptor, events: Int16(POLLIN), revents: 0)
-            let milliseconds = max(1, min(1_000, Int32((deadline.timeIntervalSinceNow * 1_000).rounded())))
             let status = poll(&descriptor, 1, milliseconds)
             if status < 0 {
                 if errno == EINTR { continue }

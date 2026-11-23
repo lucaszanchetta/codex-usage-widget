@@ -55,22 +55,43 @@ final class AppModel: ObservableObject {
     @Published private(set) var isRefreshing = false
     @Published private(set) var errorMessage: String?
     private let client = CodexRateLimitsClient()
-    private var refreshLoopTask: Task<Void, Never>?
+    private let refreshInterval: TimeInterval = 15 * 60
+    private var scheduledRefresh: Task<Void, Never>?
+
     init() {
         snapshot = UsageStore.load()
-        refreshLoopTask = Task { [weak self] in
-            while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 15 * 60 * 1_000_000_000)
-                guard !Task.isCancelled else { return }
-                self?.refresh()
-            }
+        let age = snapshot.map { Date().timeIntervalSince($0.fetchedAt) } ?? refreshInterval
+        if age >= 0, age < refreshInterval {
+            scheduleRefresh(after: refreshInterval - age)
+        } else {
+            refresh()
         }
-        refresh()
     }
-    deinit { refreshLoopTask?.cancel() }
+
+    deinit { scheduledRefresh?.cancel() }
+
+    private func scheduleRefresh(after delay: TimeInterval) {
+        scheduledRefresh = Task { [weak self] in
+            do {
+                try await Task.sleep(for: .seconds(delay), tolerance: .seconds(30), clock: .continuous)
+            } catch {
+                return
+            }
+            self?.refresh()
+        }
+    }
+
     func refresh() {
-        guard !isRefreshing else { return }; isRefreshing = true; errorMessage = nil
+        guard !isRefreshing else { return }
+        scheduledRefresh?.cancel()
+        scheduledRefresh = nil
+        isRefreshing = true
+        errorMessage = nil
         Task {
+            defer {
+                isRefreshing = false
+                scheduleRefresh(after: refreshInterval)
+            }
             do {
                 let value = try await client.fetch()
                 snapshot = value
@@ -82,7 +103,6 @@ final class AppModel: ObservableObject {
                 }
             }
             catch { errorMessage = error.localizedDescription }
-            isRefreshing = false
         }
     }
 }
@@ -165,7 +185,6 @@ struct ContentView: View {
         .padding(20)
         .task {
             loginStatus = SMAppService.mainApp.status
-            model.refresh()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             loginStatus = SMAppService.mainApp.status

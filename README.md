@@ -13,7 +13,7 @@ You need macOS 14 or later, Xcode 15 or later for the app, and the Codex CLI sig
 3. To hide the menu bar icon, open **Open Details…** from its menu and turn off **Show menu bar icon**. To turn it back on, open the running **Codex Usage** app from Finder to bring up Details.
 4. Turn on **Launch at login** in Details to start the companion at sign-in. It starts without opening Details and uses your saved menu bar icon preference. If macOS requires approval, enable Codex Usage in **System Settings → General → Login Items & Extensions**.
 
-The companion refreshes on launch and every 15 minutes while running, including when the icon is hidden. It calls the local Codex CLI for weekly rate-limit data and writes percentages and reset timestamps to a shared App Group. The desktop widget continues to display the last snapshot when the companion is closed.
+The companion refreshes about every 15 minutes while running, including when the icon is hidden. On launch it reuses a snapshot less than 15 minutes old. It queries the local Codex CLI on demand and writes percentages and reset timestamps to a shared App Group. Each successful fetch requests a widget redraw. If the companion is closed, the widget marks the snapshot stale after 30 minutes and updates the countdown less often using the cached data.
 
 For an unsigned build check:
 

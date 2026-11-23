@@ -7,7 +7,39 @@ struct Provider: TimelineProvider {
     func placeholder(in context: Context) -> CodexUsageEntry { CodexUsageEntry(date: Date(), snapshot: .preview) }
     func getSnapshot(in context: Context, completion: @escaping (CodexUsageEntry) -> Void) { completion(CodexUsageEntry(date: Date(), snapshot: UsageStore.load())) }
     func getTimeline(in context: Context, completion: @escaping (Timeline<CodexUsageEntry>) -> Void) {
-        completion(Timeline(entries: [CodexUsageEntry(date: Date(), snapshot: UsageStore.load())], policy: .after(Date().addingTimeInterval(15 * 60))))
+        let now = Date()
+        let snapshot = UsageStore.load()
+        let current = CodexUsageEntry(date: now, snapshot: snapshot)
+        guard let snapshot else {
+            completion(Timeline(entries: [current], policy: .never))
+            return
+        }
+
+        let staleAt = snapshot.fetchedAt.addingTimeInterval(UsageCalculator.staleAfter + 1)
+        guard let reset = snapshot.weeklyLimits.first?.resetsAt, reset > now else {
+            let entries = staleAt > now
+                ? [current, CodexUsageEntry(date: staleAt, snapshot: snapshot)]
+                : [current]
+            completion(Timeline(entries: entries, policy: .never))
+            return
+        }
+
+        // The companion replaces this timeline after each successful fetch.
+        // If it stops, show stale data and update the clock from cached values.
+        let hour: TimeInterval = 60 * 60
+        let fallback = min(reset, now.addingTimeInterval(6 * hour))
+        var dates = [now]
+        var next = now.addingTimeInterval(hour)
+        if staleAt > now, staleAt < fallback {
+            dates.append(staleAt)
+            next = staleAt.addingTimeInterval(hour)
+        }
+        while next < fallback {
+            dates.append(next)
+            next = next.addingTimeInterval(hour)
+        }
+        let entries = dates.map { CodexUsageEntry(date: $0, snapshot: snapshot) }
+        completion(Timeline(entries: entries, policy: .after(fallback)))
     }
 }
 

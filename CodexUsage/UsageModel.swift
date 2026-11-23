@@ -83,7 +83,9 @@ public enum UsageCalculator {
         return "\(sign)\(String(format: "%.1f", abs(gap))) pp \(label)"
     }
 
-    public static func isStale(_ snapshot: UsageSnapshot, at now: Date = Date(), threshold: TimeInterval = 30 * 60) -> Bool {
+    public static let staleAfter: TimeInterval = 30 * 60
+
+    public static func isStale(_ snapshot: UsageSnapshot, at now: Date = Date(), threshold: TimeInterval = staleAfter) -> Bool {
         now.timeIntervalSince(snapshot.fetchedAt) > threshold
     }
 }
