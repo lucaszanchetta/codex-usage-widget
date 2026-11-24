@@ -139,7 +139,7 @@ struct UsageDashboard: View {
     private func paceSplit(_ limit: WeeklyLimit) -> some View {
         if let gap = limit.paceGap(at: entry.date) {
             let visibleGap = abs(gap) < 0.05 ? 0 : gap
-            let color: Color = visibleGap == 0 ? .primary : visibleGap < 0 ? .green : .red
+            let color: Color = visibleGap == 0 ? .primary : visibleGap > 0 ? .green : .red
             VStack(alignment: .leading, spacing: 2) {
                 Text(UsageCalculator.formatPaceGap(gap))
                     .font(.system(size: isWide ? 22 : 16, weight: .bold).monospacedDigit())
@@ -165,16 +165,17 @@ struct UsageDashboard: View {
 private struct PaceGapDiagram: View {
     let gap: Double
     let color: Color
+    private let fullScaleGap: Double = 25
 
     var body: some View {
         GeometryReader { geometry in
             let half = geometry.size.width / 2
-            let width = min(half, max(2, half * abs(gap) / 100))
+            let width = min(half, max(2, half * abs(gap) / fullScaleGap))
             ZStack {
-                Capsule().fill(.quaternary).frame(height: 5)
+                Capsule().fill(.quaternary).frame(height: 7)
                 if gap != 0 {
                     Capsule().fill(color)
-                        .frame(width: width, height: 5)
+                        .frame(width: width, height: 7)
                         .offset(x: gap < 0 ? -width / 2 : width / 2)
                 }
                 Rectangle().fill(.primary).frame(width: 1.5, height: 11)

@@ -114,7 +114,10 @@ struct MenuBarContent: View {
     var body: some View {
         if let limit = model.snapshot?.weeklyLimits.first {
             Text("Codex · \(limit.remainingPercent, specifier: "%.1f")% remaining").font(.headline)
-            if let gap = limit.paceGap(at: Date()) { Text(UsageCalculator.formatPaceGap(gap)).foregroundStyle(gap < 0 ? .green : .red) }
+            if let gap = limit.paceGap(at: Date()) {
+                Text(UsageCalculator.formatPaceGap(gap))
+                    .foregroundStyle(abs(gap) < 0.05 ? Color.primary : gap > 0 ? .green : .red)
+            }
             Text(UsageCalculator.formatDuration(limit.secondsUntilReset(at: Date()))).foregroundStyle(.secondary)
             Divider()
         } else {
@@ -199,7 +202,11 @@ struct LimitCard: View {
         VStack(alignment: .leading, spacing: 8) {
             Text(limit.limitName).font(.headline); ProgressView(value: limit.usedPercent, total: 100).tint(limit.paceDelta(at: now) ?? 0 > 10 ? .orange : .accentColor)
             HStack { Text("\(limit.remainingPercent, specifier: "%.1f")% remaining"); Spacer(); Text(UsageCalculator.formatDuration(limit.secondsUntilReset(at: now))) }.font(.subheadline)
-            if let gap = limit.paceGap(at: now) { Text("Pace gap: \(UsageCalculator.formatPaceGap(gap))").font(.caption).foregroundStyle(gap < 0 ? .green : .red) }
+            if let gap = limit.paceGap(at: now) {
+                Text("Pace gap: \(UsageCalculator.formatPaceGap(gap))")
+                    .font(.caption)
+                    .foregroundStyle(abs(gap) < 0.05 ? Color.primary : gap > 0 ? .green : .red)
+            }
         }.padding(14).background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 12))
     }
 }

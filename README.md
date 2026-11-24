@@ -2,7 +2,7 @@
 
 A macOS desktop widget for the signed-in Codex CLI account. It shows the weekly allowance used and remaining, the time until reset, and the percentage you would have used by now at an even pace.
 
-The racing-style split is target usage minus actual usage, in percentage points. A negative split means you are ahead of the target. A positive split means you are behind.
+The racing-style split is target usage minus actual usage, in percentage points. The bar is green below target and red above it. A 25-point gap fills one side of the bar. The label keeps showing the actual gap even when the bar is full.
 
 ## Build and run
 
